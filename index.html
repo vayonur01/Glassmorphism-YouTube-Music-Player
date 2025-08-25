@@ -1,0 +1,275 @@
+<!-- 
+===============================================================
+🎶 Glassmorphism YouTube Music Player
+👨‍💻 Kod Sahibi: vayonur
+
+📌 Bu kod, YouTube Data API v3 ve YouTube IFrame Player API kullanarak 
+bir müzik oynatıcı yapar. 
+Kullanıcı arama çubuğuna şarkı ismini yazar → YouTube’dan arama yapar → 
+playlist’e ekler → seçilen şarkıyı oynatır.  
+
+---------------------------------------------------------------
+📖 Ne yapmanız gerekiyor?
+1. Google Cloud Console’dan bir API anahtarı alın:
+   - https://console.cloud.google.com/
+   - Yeni proje oluşturun
+   - "YouTube Data API v3" etkinleştirin
+   - "Credentials" bölümünden API Key alın
+2. Aşağıdaki kodda API anahtarınızı bu satıra yazın:
+   const YT_API_KEY = "BURAYA_SENİN_KEYİN";
+3. Dosyayı kaydedip tarayıcıda açın.
+
+---------------------------------------------------------------
+⚙️ Özellikler:
+- Şarkı arama (YouTube API ile)
+- Playlist oluşturma
+- Oynat / Duraklat
+- Önceki / Sonraki
+- Shuffle (karıştır)
+- Loop (tekrar çal)
+- Ses kontrolü
+- Zaman ve ilerleme çubuğu
+
+---------------------------------------------------------------
+📌 Not:
+- Bu kod tamamen YouTube’a bağlıdır, şarkılar YouTube üzerinden çalınır.
+- Çalışması için internet bağlantısı ve geçerli API anahtarı gerekir.
+
+===============================================================
+-->
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Music Player - vayonur</title>
+
+  <!-- TailwindCSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+
+  <!-- YouTube IFrame API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+
+  <style>
+    body {
+      background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: sans-serif;
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(15px);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    .playlist {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .playlist::-webkit-scrollbar {
+      width: 6px;
+    }
+    .playlist::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.3);
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="glass p-6 w-[400px] text-white">
+    <!-- 🎶 Arama kutusu -->
+    <div class="flex mb-4">
+      <input id="searchInput" type="text" placeholder="Şarkı ara..."
+        class="flex-1 p-2 rounded-l-xl text-black" />
+      <button id="searchBtn" class="bg-blue-500 px-4 rounded-r-xl"><i class="fas fa-search"></i></button>
+    </div>
+
+    <!-- 🎵 Şarkı bilgisi -->
+    <div class="text-center mb-4">
+      <img id="cover" src="https://via.placeholder.com/150" class="mx-auto rounded-xl mb-2 w-40 h-40 object-cover">
+      <h2 id="title" class="text-lg font-bold">Şarkı Adı</h2>
+      <p id="artist" class="text-sm text-gray-300">Sanatçı</p>
+    </div>
+
+    <!-- 🎼 Playlist -->
+    <div id="playlist" class="playlist mb-4"></div>
+
+    <!-- ▶️ Kontroller -->
+    <div class="flex justify-center items-center gap-4 mb-4">
+      <button id="prevBtn"><i class="fas fa-backward"></i></button>
+      <button id="playPauseBtn"><i class="fas fa-play"></i></button>
+      <button id="nextBtn"><i class="fas fa-forward"></i></button>
+    </div>
+
+    <div class="flex justify-center items-center gap-4 mb-4">
+      <button id="shuffleBtn"><i class="fas fa-random"></i></button>
+      <button id="loopBtn"><i class="fas fa-redo"></i></button>
+      <input id="volumeControl" type="range" min="0" max="100" value="50" class="w-24">
+    </div>
+
+    <!-- 📊 Progress -->
+    <div class="mb-2">
+      <input id="progressBar" type="range" min="0" max="100" value="0" class="w-full">
+    </div>
+    <div class="flex justify-between text-xs text-gray-300">
+      <span id="currentTime">0:00</span>
+      <span id="duration">0:00</span>
+    </div>
+  </div>
+
+  <!-- 🎬 YouTube Player (gizli olabilir) -->
+  <div id="player" style="display:none;"></div>
+
+  <script>
+    // 🔑 API Key buraya gelecek
+    const YT_API_KEY = "BURAYA_SENİN_KEYİN";
+
+    let player;
+    let currentVideoIndex = 0;
+    let playlist = [];
+    let isPlaying = false;
+    let isLoop = false;
+    let isShuffle = false;
+
+    // YouTube IFrame API hazır olduğunda çağrılır
+    function onYouTubeIframeAPIReady() {
+      player = new YT.Player("player", {
+        height: "0",
+        width: "0",
+        events: {
+          "onReady": onPlayerReady,
+          "onStateChange": onPlayerStateChange,
+        }
+      });
+    }
+
+    function onPlayerReady() {
+      console.log("YouTube Player Hazır!");
+    }
+
+    function onPlayerStateChange(event) {
+      if (event.data === YT.PlayerState.ENDED) {
+        if (isLoop) {
+          player.playVideo();
+        } else {
+          nextSong();
+        }
+      }
+    }
+
+    // 🎶 Şarkı Ara
+    document.getElementById("searchBtn").addEventListener("click", searchSongs);
+    document.getElementById("searchInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") searchSongs();
+    });
+
+    function searchSongs() {
+      const query = document.getElementById("searchInput").value;
+      if (!query) return;
+
+      fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${query}&maxResults=5&key=${YT_API_KEY}`)
+        .then(res => res.json())
+        .then(data => {
+          playlist = data.items.map(item => ({
+            videoId: item.id.videoId,
+            title: item.snippet.title,
+            artist: item.snippet.channelTitle,
+            cover: item.snippet.thumbnails.medium.url,
+          }));
+          currentVideoIndex = 0;
+          renderPlaylist();
+          loadSong(currentVideoIndex);
+        });
+    }
+
+    // 🎵 Playlist Göster
+    function renderPlaylist() {
+      const list = document.getElementById("playlist");
+      list.innerHTML = "";
+      playlist.forEach((song, index) => {
+        const div = document.createElement("div");
+        div.className = "flex items-center gap-2 p-2 hover:bg-white/10 rounded cursor-pointer";
+        div.innerHTML = `
+          <img src="${song.cover}" class="w-12 h-12 rounded object-cover">
+          <div>
+            <p class="text-sm font-bold">${song.title}</p>
+            <p class="text-xs text-gray-300">${song.artist}</p>
+          </div>
+        `;
+        div.onclick = () => loadSong(index);
+        list.appendChild(div);
+      });
+    }
+
+    // 🎧 Şarkı Yükle
+    function loadSong(index) {
+      const song = playlist[index];
+      if (!song) return;
+
+      currentVideoIndex = index;
+      document.getElementById("cover").src = song.cover;
+      document.getElementById("title").innerText = song.title;
+      document.getElementById("artist").innerText = song.artist;
+
+      player.loadVideoById(song.videoId);
+      playSong();
+    }
+
+    function playSong() {
+      player.playVideo();
+      isPlaying = true;
+      document.getElementById("playPauseBtn").innerHTML = `<i class="fas fa-pause"></i>`;
+    }
+
+    function pauseSong() {
+      player.pauseVideo();
+      isPlaying = false;
+      document.getElementById("playPauseBtn").innerHTML = `<i class="fas fa-play"></i>`;
+    }
+
+    function nextSong() {
+      if (isShuffle) {
+        currentVideoIndex = Math.floor(Math.random() * playlist.length);
+      } else {
+        currentVideoIndex = (currentVideoIndex + 1) % playlist.length;
+      }
+      loadSong(currentVideoIndex);
+    }
+
+    function prevSong() {
+      currentVideoIndex = (currentVideoIndex - 1 + playlist.length) % playlist.length;
+      loadSong(currentVideoIndex);
+    }
+
+    // 🎛 Kontroller
+    document.getElementById("playPauseBtn").addEventListener("click", () => {
+      isPlaying ? pauseSong() : playSong();
+    });
+    document.getElementById("nextBtn").addEventListener("click", nextSong);
+    document.getElementById("prevBtn").addEventListener("click", prevSong);
+
+    document.getElementById("loopBtn").addEventListener("click", () => {
+      isLoop = !isLoop;
+      alert("Loop: " + (isLoop ? "Açık" : "Kapalı"));
+    });
+
+    document.getElementById("shuffleBtn").addEventListener("click", () => {
+      isShuffle = !isShuffle;
+      alert("Shuffle: " + (isShuffle ? "Açık" : "Kapalı"));
+    });
+
+    // 🔊 Ses Kontrol
+    document.getElementById("volumeControl").addEventListener("input", e => {
+      player.setVolume(e.target.value);
+    });
+  </script>
+</body>
+</html>
